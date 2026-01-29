@@ -39,6 +39,18 @@ st.sidebar.info("""
 1. "전체 후기 개수가 몇 개야?"
 2. "속성별 후기 분포를 차트로 그려줘"
 3. "가장 불만이 많은 속성은 뭐야?"
+4. "부정 키워드 top 5 알려줘"
+""")
+
+st.sidebar.header("📊 시각화 가이드")
+st.sidebar.success("""
+**차트 유형:**
+- 📊 막대차트: "속성별 차트 그려줘"
+- 🥧 파이차트: "배송 파이차트"
+- 🍩 도넛차트: "사용감 도넛 차트"
+- 📈 라인차트: "감성 추이 라인차트"
+- 🌳 트리맵: "속성 트리맵"
+- ☁️ 워드클라우드: "배송 워드클라우드"
 """)
 
 # 2. 세션 상태 초기화
@@ -143,9 +155,28 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                 elif "중립" in prompt:
                     sentiment_filter = "중립"
                 
-                # 특정 속성명 감지
+                # 감성 제외 패턴 감지 (예: "중립 빼고", "중립 제외하고")
+                exclude_sentiments = []
+                sentiment_exclude_keywords = ["빼고", "제외", "없이", "말고"]
+                for sent in ["긍정", "부정", "중립", "혼합"]:
+                    for kw in sentiment_exclude_keywords:
+                        if f"{sent} {kw}" in prompt or f"{sent}{kw}" in prompt:
+                            exclude_sentiments.append(sent)
+                            sentiment_filter = None  # 제외 모드에서는 필터 해제
+                
+                # 특정 속성명 감지 (부분 매칭 지원 - '냄새' -> '냄새/향')
                 all_attributes = df['속성'].unique().tolist()
-                mentioned_attrs = [attr for attr in all_attributes if attr in prompt]
+                mentioned_attrs = []
+                for attr in all_attributes:
+                    # 정확히 일치하거나
+                    if attr in prompt:
+                        mentioned_attrs.append(attr)
+                    else:
+                        # 슬래시로 분리된 부분 매칭 (예: '냄새' -> '냄새/향')
+                        for part in attr.split('/'):
+                            if part in prompt and attr not in mentioned_attrs:
+                                mentioned_attrs.append(attr)
+                                break
                 
                 # "지우고", "제외하고" 패턴 감지 - 이전 차트에서 특정 속성 제외
                 exclude_keywords = ["지우고", "제외하고", "빼고", "없이", "제외"]
@@ -168,6 +199,10 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                         plot_df = filtered_df
                     else:
                         st.info(f"ℹ️ '{', '.join(mentioned_attrs)}' 속성 데이터를 찾을 수 없어 전체 데이터를 사용합니다.")
+                
+                # 감성 제외 적용
+                if exclude_sentiments:
+                    plot_df = plot_df[~plot_df['감성'].isin(exclude_sentiments)]
                 
                 # 사용자 질문에서 직접 차트 유형 결정
                 wordcloud_img_base64 = None  # 워드클라우드 이미지 초기화
@@ -276,29 +311,49 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                         wordcloud_img_base64 = None
                         if text.strip():
                             # 한글 폰트 경로 (맥용)
+                            import os
+                            import re
                             font_paths = [
                                 '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
+                                '/System/Library/Fonts/AppleSDGothicNeo.ttc',
                                 '/Library/Fonts/AppleGothic.ttf',
-                                '/System/Library/Fonts/AppleSDGothicNeo.ttc'
+                                '/System/Library/Fonts/Supplemental/NotoSansGothic-Regular.ttf'
                             ]
                             font_path = None
                             for fp in font_paths:
-                                import os
                                 if os.path.exists(fp):
                                     font_path = fp
                                     break
                             
+                            # 한글 단어 정규식 (한글, 영문, 숫자를 하나의 단어로 인식)
+                            korean_regexp = r'[\uAC00-\uD7A3a-zA-Z0-9]+'
+                            
+                            # 예쁜 색상 함수 정의
+                            def color_func(word, font_size, position, orientation, random_state=None, **kwargs):
+                                import random
+                                colors = ['#3498db', '#e74c3c', '#2ecc71', '#9b59b6', '#f39c12', '#1abc9c', '#e91e63', '#00bcd4']
+                                return random.choice(colors)
+                            
                             wordcloud = WordCloud(
                                 font_path=font_path,
-                                width=800, height=400,
+                                width=1600, height=800,  # 해상도 2배
                                 background_color='white',
-                                colormap='viridis'
+                                max_words=100,
+                                min_font_size=12,
+                                max_font_size=150,
+                                regexp=korean_regexp,
+                                color_func=color_func  # 예쁜 색상
                             ).generate(text)
                             
                             # matplotlib으로 워드클라우드 생성 및 base64 저장
                             import io
                             import base64
-                            fig_wc, ax = plt.subplots(figsize=(10, 5))
+                            from matplotlib import font_manager
+                            
+                            # matplotlib 한글 폰트 설정
+                            font_prop = font_manager.FontProperties(fname=font_path) if font_path else None
+                            
+                            fig_wc, ax = plt.subplots(figsize=(14, 7))  # 더 큰 크기
                             ax.imshow(wordcloud, interpolation='bilinear')
                             ax.axis('off')
                             # 제목에 속성 및 감성 정보 표시
@@ -308,13 +363,14 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                             if sentiment_filter:
                                 title_parts.append(sentiment_filter)
                             if title_parts:
-                                ax.set_title(f"📊 {' '.join(title_parts)} 리뷰 워드클라우드")
+                                title_text = f"📊 {' '.join(title_parts)} 리뷰 워드클라우드"
                             else:
-                                ax.set_title("📊 전체 리뷰 워드클라우드")
+                                title_text = "📊 전체 리뷰 워드클라우드"
+                            ax.set_title(title_text, fontproperties=font_prop, fontsize=16, fontweight='bold')
                             
-                            # 이미지를 base64로 인코딩
+                            # 이미지를 base64로 인코딩 (고화질)
                             buf = io.BytesIO()
-                            fig_wc.savefig(buf, format='png', bbox_inches='tight', dpi=100)
+                            fig_wc.savefig(buf, format='png', bbox_inches='tight', dpi=150, facecolor='white')
                             buf.seek(0)
                             wordcloud_img_base64 = base64.b64encode(buf.read()).decode('utf-8')
                             plt.close()
@@ -440,11 +496,73 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                                  color_discrete_sequence=px.colors.qualitative.Pastel)
                     fig.update_traces(textposition='outside')
                     st.session_state.last_chart_type = "simple"
+                # 속성만 언급하고 차트 키워드가 없는 경우 - 이전 차트 유형 유지 또는 기본 막대 차트
+                elif mentioned_attrs and len(mentioned_attrs) >= 1 and st.session_state.last_chart_type:
+                    # 이전에 차트를 보고 있었다면 같은 유형으로 계속 보여줌
+                    if st.session_state.last_chart_type == "pie":
+                        figs = []
+                        for attr in mentioned_attrs:
+                            attr_df = df[df['속성'] == attr]
+                            if exclude_sentiments:
+                                attr_df = attr_df[~attr_df['감성'].isin(exclude_sentiments)]
+                            counts = attr_df['감성'].value_counts().reset_index()
+                            counts.columns = ['감성', '리뷰수']
+                            if len(counts) > 0:
+                                fig_single = px.pie(counts, names='감성', values='리뷰수', 
+                                             title=f"📊 {attr} 감성 분포 (파이차트)",
+                                             color='감성',
+                                             color_discrete_map={'긍정': '#2ecc71', '부정': '#e74c3c', '중립': '#95a5a6'})
+                                fig_single.update_traces(textposition='inside', textinfo='label+value+percent')
+                                figs.append(fig_single)
+                        fig = figs if figs else None
+                    else:
+                        # 기본: 속성별 막대 차트
+                        counts = plot_df['속성'].value_counts().reset_index()
+                        counts.columns = ['속성', '리뷰수']
+                        fig = px.bar(counts, x='속성', y='리뷰수', color='속성', 
+                                     title=f"📊 선택 속성 분포",
+                                     text='리뷰수',
+                                     color_discrete_sequence=px.colors.qualitative.Pastel)
+                        fig.update_traces(textposition='outside')
                 else:
                     # 차트 없음 (텍스트 질문)
                     fig = None
                 
-                # [Step 3.5] 키워드 검색 기능
+                # [Step 3.5] 키워드 추출 기능 (리뷰 텍스트에서 단어 빈도 분석)
+                keyword_result = None
+                if "키워드" in prompt or "단어" in prompt or "많이 나온" in prompt:
+                    import re
+                    from collections import Counter
+                    
+                    # 분석할 데이터프레임 선택 (감성 필터 적용)
+                    keyword_df = plot_df.copy()
+                    if sentiment_filter:
+                        keyword_df = keyword_df[keyword_df['감성'] == sentiment_filter]
+                    
+                    # 리뷰 텍스트에서 한글 단어 추출
+                    all_text = " ".join(keyword_df['리뷰'].dropna().astype(str).tolist())
+                    korean_words = re.findall(r'[\uAC00-\uD7A3]{2,}', all_text)  # 2글자 이상 한글
+                    
+                    # 불용어 제거
+                    stopwords = ['있어요', '없어요', '같아요', '좋아요', '있는', '없는', '같은', '하는', '되는', 
+                                '그리고', '그래서', '하지만', '근데', '그런데', '아주', '정말', '너무', '매우',
+                                '이거', '저거', '그거', '이게', '저게', '그게', '것도', '것이', '되어', '하고']
+                    filtered_words = [w for w in korean_words if w not in stopwords and len(w) >= 2]
+                    
+                    # 빈도 계산
+                    word_counts = Counter(filtered_words)
+                    top_count = top_n if top_n else 10
+                    top_keywords = word_counts.most_common(top_count)
+                    
+                    sentiment_label = sentiment_filter if sentiment_filter else "전체"
+                    if top_keywords:
+                        keyword_result = f"\n\n**📝 {sentiment_label} 리뷰 키워드 Top {len(top_keywords)}:**\n"
+                        for i, (word, count) in enumerate(top_keywords, 1):
+                            keyword_result += f"{i}. **{word}** ({count}회)\n"
+                    else:
+                        keyword_result = f"\n\n⚠️ {sentiment_label} 리뷰에서 추출된 키워드가 없습니다. (분석된 텍스트: {len(all_text)}자, 추출된 단어: {len(korean_words)}개)"
+                
+                # [Step 3.6] 키워드 검색 기능
                 search_result = None
                 search_keywords = ["찾아", "검색", "포함", "있는", "후기", "리뷰"]
                 if any(kw in prompt for kw in search_keywords):
@@ -520,6 +638,10 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                     ("user", f"질문: {prompt}")
                 ]
                 analysis_res = llm.invoke(report_msg).content
+                
+                # 키워드 분석 결과가 있으면 추가
+                if keyword_result:
+                    analysis_res += keyword_result
                 
                 # 키워드 검색 결과가 있으면 추가
                 if search_result:

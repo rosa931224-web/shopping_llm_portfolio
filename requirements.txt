@@ -4,3 +4,5 @@ pandas
 anthropic
 langchain
 langchain-anthropic
+langchain-openai
+openai

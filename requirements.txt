@@ -6,3 +6,6 @@ langchain
 langchain-anthropic
 langchain-openai
 openai
+plotly
+matplotlib
+wordcloud

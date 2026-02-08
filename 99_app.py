@@ -104,6 +104,15 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                 # 상태 메시지를 한 줄로 표시하기 위한 placeholder
                 status_text = st.empty()
                 
+                # [Step 0] 리뷰 표시 요청 여부 먼저 확인 (최우선 체크)
+                show_all_keywords = ["전체 리뷰", "모든 리뷰", "전체 보여줘", "리뷰 전체", 
+                                    "리뷰만 보여줘", "리뷰 보여줘", "리뷰만", "리뷰 목록", 
+                                    "원문", "원문 보여줘", "내용 보여줘", "텍스트", "리스트"]
+                chart_keywords = ["차트", "그래프", "그려", "시각화", "파이", "막대", "도넛", "트리맵", "워드클라우드", "라인"]
+                
+                # 리뷰 표시 요청인지 확인
+                is_review_request = any(kw in prompt for kw in show_all_keywords) and not any(kw in prompt for kw in chart_keywords)
+                
                 # [Step 1] 차트 유형 및 분석 방향 결정
                 status_text.write("🔍 질문을 분석 중입니다...")
                 chart_decision_msg = [
@@ -137,9 +146,6 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                 plot_df = df.copy()
                 if "없음" not in exclude_word:
                     plot_df = plot_df[plot_df['속성'] != exclude_word]
-                
-                # [Step 3] 차트 유형에 따른 시각화 생성
-                status_text.write("📈 맞춤형 차트를 생성하고 있습니다...")
                 
                 # Top N 필터링 감지
                 import re
@@ -181,13 +187,15 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                                 break
                 
                 # 현재 질문에 속성이 없으면 이전 대화의 속성 사용 (컨텍스트 유지)
-                if not mentioned_attrs and st.session_state.last_mentioned_attrs:
+                # 단, 리뷰 표시 요청이 아닐 때만
+                if not mentioned_attrs and st.session_state.last_mentioned_attrs and not is_review_request:
                     mentioned_attrs = st.session_state.last_mentioned_attrs.copy()
                 
                 # 현재 질문에 감성이 없으면 이전 대화의 감성 사용 (컨텍스트 유지)
-                # 단, 명시적으로 "전체"를 요청하는 경우는 제외
-                if not sentiment_filter and st.session_state.last_sentiment_filter and "전체" not in prompt:
+                # 단, 명시적으로 "전체"를 요청하거나 리뷰 표시 요청인 경우는 제외
+                if not sentiment_filter and st.session_state.last_sentiment_filter and "전체" not in prompt and not is_review_request:
                     sentiment_filter = st.session_state.last_sentiment_filter
+                
                 
                 # "지우고", "제외하고" 패턴 감지 - 이전 차트에서 특정 속성 제외
                 exclude_keywords = ["지우고", "제외하고", "빼고", "없이", "제외"]
@@ -219,20 +227,47 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                 if sentiment_filter:
                     plot_df = plot_df[plot_df['감성'] == sentiment_filter]
                 
-                # 리뷰 표시 요청 키워드 감지 (차트 생성 전에 먼저 확인)
-                show_all_keywords = ["전체 리뷰", "모든 리뷰", "전체 보여줘", "리뷰 전체", 
-                                    "리뷰만 보여줘", "리뷰 보여줘", "리뷰만", "리뷰 목록", 
-                                    "원문", "원문 보여줘", "내용 보여줘", "텍스트 보여줘"]
-                chart_keywords = ["차트", "그래프", "그려", "시각화", "파이", "막대", "도넛", "트리맵", "워드클라우드", "라인"]
-                is_review_request = any(kw in prompt for kw in show_all_keywords) and not any(kw in prompt for kw in chart_keywords)
                 
-                # 사용자 질문에서 직접 차트 유형 결정
+                # [Step 3] 차트 유형에 따른 시각화 생성
+                # 리뷰 표시 요청이 아닐 때만 차트 생성
                 wordcloud_img_base64 = None  # 워드클라우드 이미지 초기화
                 
-                # 리뷰 표시 요청이 아닐 때만 차트 생성
                 if not is_review_request:
+                    status_text.write("📈 맞춤형 차트를 생성하고 있습니다...")
+                    
+                    # 이전 차트 수정 모드일 때 - 이전 차트 타입 유지
+                    if is_chart_modification and st.session_state.last_chart_type:
+                        if st.session_state.last_chart_type == "simple":
+                            # 단순 속성 분포 차트 (이전과 동일)
+                            counts = plot_df['속성'].value_counts().reset_index()
+                            counts.columns = ['속성', '리뷰수']
+                            fig = px.bar(counts, x='속성', y='리뷰수', color='속성', 
+                                         title="📊 속성 분포",
+                                         text='리뷰수',
+                                         color_discrete_sequence=px.colors.qualitative.Pastel)
+                            fig.update_traces(textposition='outside')
+                        elif st.session_state.last_chart_type == "pie":
+                            # 파이차트 (이전과 동일)
+                            counts = plot_df['속성'].value_counts().reset_index()
+                            counts.columns = ['속성', '리뷰수']
+                            fig = px.pie(counts, names='속성', values='리뷰수', 
+                                         title="📊 속성 분포 (파이차트)",
+                                         color_discrete_sequence=px.colors.qualitative.Pastel)
+                            fig.update_traces(textposition='inside', textinfo='label+value+percent')
+                        else:  # sentiment
+                            # 속성별 감성 분포 차트
+                            counts = plot_df.groupby(['속성', '감성']).size().reset_index(name='리뷰수')
+                            fig = px.bar(counts, x='속성', y='리뷰수', color='감성', 
+                                         barmode='group',
+                                         title="📊 속성별 감성 분포",
+                                         text='리뷰수',
+                                         color_discrete_map={'긍정': '#2ecc71', '부정': '#e74c3c', '중립': '#95a5a6'})
+                            fig.update_traces(textposition='outside')
+                    
+                    # ===== 새로운 차트 유형들 =====
+                    
                     # 도넛 차트
-                    if "도넛" in prompt or "donut" in prompt.lower():
+                    elif "도넛" in prompt or "donut" in prompt.lower():
                         if mentioned_attrs and len(mentioned_attrs) >= 1:
                             figs = []
                             for attr in mentioned_attrs:
@@ -378,6 +413,8 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                                       markers=True,
                                       color_discrete_map={'긍정': '#2ecc71', '부정': '#e74c3c', '중립': '#95a5a6'})
                         st.session_state.last_chart_type = "line"
+                    
+                    # ===== 기존 차트 유형들 =====
                     
                     # 파이차트 요청
                     elif "파이" in prompt or "pie" in prompt.lower() or "원형" in prompt:
@@ -582,7 +619,7 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                 # [Step 3.7] 전체 리뷰 표시 기능
                 all_reviews_result = None
                 
-                # 리뷰 표시 요청일 때만 리뷰 표시
+                # 리뷰 표시 요청일 때만 리뷰 표시 (위에서 정의한 is_review_request 사용)
                 if is_review_request:
                     # 필터링된 데이터에서 리뷰 추출
                     filtered_reviews = plot_df.copy()
@@ -612,11 +649,12 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                         else:
                             display_count = unique_count
                         
-                        # 리뷰 목록 생성
+                        # 리뷰 목록 생성 (감성 표시 제거)
                         for idx, (_, row) in enumerate(filtered_reviews.head(display_count).iterrows(), 1):
                             all_reviews_result += f"{idx}. {row['리뷰']}\n\n"
                     else:
                         all_reviews_result = "\n\n⚠️ 해당 조건의 리뷰가 없습니다."
+                
                 
                 # [Step 4] 리포트 작성
                 status_text.write("✍️ 분석 리포트를 작성 중입니다...")
@@ -655,7 +693,7 @@ if prompt := st.chat_input("질문을 입력하세요!"):
 8. 그래프가 자동으로 생성된다는 점을 언급하지 마세요
 9. 사용자가 "전체 리뷰", "모든 리뷰", "원문" 등을 요청하면 시스템이 자동으로 전체 리뷰 목록을 제공하므로, 당신은 리뷰 내용을 직접 나열하지 마세요
 10. 리뷰 전체를 요청받으면 아주 간단히 "아래에 리뷰를 표시합니다" 정도로만 답하고, 절대로 리뷰 예시를 직접 쓰지 마세요
-11. "리뷰", "원문" 등을 요청하면 그래프는 보여주지 마세요.
+11. 사용자가 차트를 요청하면 리뷰 내용을 언급하지 말고, 차트 분석만 하세요
 
 이전 대화:
 """ + conversation_history + """
@@ -681,9 +719,17 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                 if all_reviews_result:
                     analysis_res += all_reviews_result
                 
+                
+                
                 # 현재 사용된 필터를 세션에 저장 (다음 질문에서 컨텍스트 유지)
+                # 속성과 감성 필터는 항상 저장 (리뷰 표시 후에도 컨텍스트 유지)
                 st.session_state.last_mentioned_attrs = mentioned_attrs if mentioned_attrs else []
                 st.session_state.last_sentiment_filter = sentiment_filter
+                
+                # 리뷰 표시 요청일 때는 차트 타입만 초기화 (다음에 차트 안 나오도록)
+                if is_review_request:
+                    st.session_state.last_chart_type = None
+                    st.session_state.last_chart_attrs = None
                 
                 # 완료 후 상태 메시지 제거
                 status_text.empty()

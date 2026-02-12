@@ -6,6 +6,17 @@ from dotenv import load_dotenv
 from langchain_openai import ChatOpenAI
 import plotly.express as px
 import plotly.graph_objects as go
+import os
+import platform
+
+def get_font_path():
+    """운영체제에 맞는 한글 폰트 경로 반환"""
+    if platform.system() == 'Windows':
+        return 'malgun.ttf'
+    elif platform.system() == 'Darwin':  # macOS
+        return '/System/Library/Fonts/AppleGothic.ttf'
+    else:  # Linux (Streamlit Cloud)
+        return '/usr/share/fonts/truetype/nanum/NanumGothic.ttf'
 
 # 워드클라우드 및 matplotlib 선택적 import (없으면 해당 기능만 비활성화)
 WORDCLOUD_AVAILABLE = False
@@ -16,7 +27,9 @@ try:
     
     # Streamlit 환경에서 한글 폰트 전역 설정
     font_paths = [
-        '/System/Library/Fonts/AppleSDGothicNeo.ttc',
+        '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',  # Linux (Streamlit Cloud) - 맨 앞에 추가!
+        '/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf',  # Linux 대체
+        '/System/Library/Fonts/AppleSDGothicNeo.ttc',  # macOS
         '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
         '/Library/Fonts/AppleGothic.ttf'
     ]
@@ -359,7 +372,9 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                                 import os
                                 import re
                                 font_paths = [
-                                    '/System/Library/Fonts/AppleSDGothicNeo.ttc',
+                                    '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',  # Linux 먼저
+                                    '/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf',
+                                    '/System/Library/Fonts/AppleSDGothicNeo.ttc',  # macOS
                                     '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
                                     '/Library/Fonts/AppleGothic.ttf'
                                 ]

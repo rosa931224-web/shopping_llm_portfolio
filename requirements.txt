@@ -9,3 +9,5 @@ openai
 plotly
 matplotlib
 wordcloud
+numpy
+langgraph

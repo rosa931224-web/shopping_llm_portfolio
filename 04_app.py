@@ -485,7 +485,7 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                                      color_discrete_map={'긍정': '#2ecc71', '부정': '#e74c3c', '중립': '#95a5a6'})
                         fig.update_traces(textposition='inside', textinfo='label+value+percent')
                     elif sentiment_filter and ("차트" in prompt or "그래프" in prompt or "비중" in prompt or "그려" in prompt):
-                        # 특정 감성만 필터링하여 속성별 비중 차트
+                        # 특정 감성만 필터링하여 속성별 비중차트 
                         filtered_sentiment_df = plot_df[plot_df['감성'] == sentiment_filter]
                         counts = filtered_sentiment_df['속성'].value_counts().reset_index()
                         counts.columns = ['속성', '리뷰수']

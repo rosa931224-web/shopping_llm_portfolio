@@ -3,7 +3,7 @@ import pandas as pd
 import sqlite3
 from dotenv import load_dotenv
 
-# 1. 환경 설정
+# 1. 환경설정 
 load_dotenv()
 
 # 2. 경로 설정 (data 폴더 안의 원본 파일)

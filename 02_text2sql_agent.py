@@ -23,7 +23,6 @@ llm = ChatGoogleGenerativeAI(
 memory = MemorySaver()
 
 # 5. 랭그래프 기반 SQL 에이전트 생성
-# 'checkpointer'를 넣으면 대화 맥락이 유지됩니다.
 agent_executor = create_sql_agent(
     llm, 
     db=db, 
@@ -33,7 +32,7 @@ agent_executor = create_sql_agent(
 )
 
 # 6. 연속 대화 테스트
-# 'thread_id'는 지윤님과의 대화방 고유 번호예요.
+# 'thread_id'는 대화방 고유 번호
 config = {"configurable": {"thread_id": "jiyun_session_001"}}
 
 print("\n--- 🤖 랭그래프 분석 비서 가동 (기억력 탑재) ---")

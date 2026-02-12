@@ -11,7 +11,27 @@ import plotly.graph_objects as go
 WORDCLOUD_AVAILABLE = False
 try:
     import matplotlib.pyplot as plt
+    import matplotlib.font_manager as fm
     from wordcloud import WordCloud
+    
+    # Streamlit 환경에서 한글 폰트 전역 설정
+    font_paths = [
+        '/System/Library/Fonts/AppleSDGothicNeo.ttc',
+        '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
+        '/Library/Fonts/AppleGothic.ttf'
+    ]
+    korean_font_path = None
+    for fp in font_paths:
+        if os.path.exists(fp):
+            korean_font_path = fp
+            break
+    
+    if korean_font_path:
+        # matplotlib에 한글 폰트 등록
+        font_name = fm.FontProperties(fname=korean_font_path).get_name()
+        plt.rcParams['font.family'] = font_name
+        plt.rcParams['axes.unicode_minus'] = False  # 마이너스 기호 깨짐 방지
+    
     WORDCLOUD_AVAILABLE = True
 except ImportError:
     pass
@@ -357,30 +377,25 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                                 
                                 try:
                                     wordcloud = WordCloud(
-                                        font_path=font_path,
+                                        font_path=korean_font_path if 'korean_font_path' in dir() else font_path,
                                         width=1200, height=600,
                                         background_color='white',
                                         max_words=80,
                                         min_font_size=14,
                                         max_font_size=120,
                                         regexp=korean_regexp,
-                                        colormap='Blues'  # 깔끔한 블루 그라데이션
+                                        colormap='Blues'
                                     ).generate(text)
                                     
                                     # matplotlib으로 워드클라우드 생성 및 base64 저장
                                     import io
                                     import base64
-                                    from matplotlib import font_manager
                                     import matplotlib.pyplot as plt
                                     
-                                    # matplotlib 한글 폰트 설정
-                                    if font_path:
-                                        font_prop = font_manager.FontProperties(fname=font_path)
-                                        plt.rcParams['font.family'] = font_prop.get_name()
-                                    
-                                    fig_wc, ax = plt.subplots(figsize=(14, 7))  # 더 큰 크기
+                                    fig_wc, ax = plt.subplots(figsize=(14, 7))
                                     ax.imshow(wordcloud, interpolation='bilinear')
                                     ax.axis('off')
+                                    
                                     # 제목에 속성 및 감성 정보 표시
                                     title_parts = []
                                     if mentioned_attrs:
@@ -391,13 +406,7 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                                         title_text = f"📊 {' '.join(title_parts)} 리뷰 워드클라우드"
                                     else:
                                         title_text = "📊 전체 리뷰 워드클라우드"
-                                    
-                                    # 제목 설정 (폰트 속성 사용)
-                                    if font_path:
-                                        font_prop = font_manager.FontProperties(fname=font_path)
-                                        ax.set_title(title_text, fontproperties=font_prop, fontsize=16, fontweight='bold')
-                                    else:
-                                        ax.set_title(title_text, fontsize=16, fontweight='bold')
+                                    ax.set_title(title_text, fontsize=16, fontweight='bold')
                                     
                                     # 이미지를 base64로 인코딩 (고화질)
                                     buf = io.BytesIO()

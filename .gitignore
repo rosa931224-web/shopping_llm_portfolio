@@ -1,2 +1,19 @@
+# API 키 및 환경 변수
 .env
-.streamlit/secrets.toml
+.env.local
+
+# Python 캐시
+__pycache__/
+*.pyc
+
+# 데이터베이스
+*.db
+*.sqlite
+
+# 기타
+.DS_Store
+
+#불필요 파일
+99_app.py
+xxx_04_app.py
+확인필요_04_app.py

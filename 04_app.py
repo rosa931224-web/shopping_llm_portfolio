@@ -189,6 +189,38 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                 if not sentiment_filter and st.session_state.last_sentiment_filter and "전체" not in prompt:
                     sentiment_filter = st.session_state.last_sentiment_filter
                 
+                # 스마트 속성 감지 - "가장 ~한 속성" 패턴 처리
+                smart_patterns = {
+                    "불만": ["가장 불만", "불만이 많은", "불만 많은", "가장 문제"],
+                    "긍정": ["가장 만족", "만족도가 높은", "가장 좋은", "좋은 평가"],
+                    "문제": ["가장 나쁜", "최악", "가장 안좋은"]
+                }
+                
+                for pattern_type, patterns in smart_patterns.items():
+                    if any(p in prompt for p in patterns) and not mentioned_attrs:
+                        # 패턴이 감지되면 해당 속성 찾기
+                        if pattern_type == "불만" or pattern_type == "문제":
+                            # 부정 리뷰가 가장 많은 속성 찾기
+                            negative_counts = df[df['감성'] == '부정'].groupby('속성').size().sort_values(ascending=False)
+                            if len(negative_counts) > 0:
+                                top_attr = negative_counts.index[0]
+                                mentioned_attrs = [top_attr]
+                                if not sentiment_filter:  # 감성이 명시되지 않았으면 부정으로 설정
+                                    sentiment_filter = "부정"
+                        elif pattern_type == "긍정":
+                            # 긍정 리뷰가 가장 많은 속성 찾기
+                            positive_counts = df[df['감성'] == '긍정'].groupby('속성').size().sort_values(ascending=False)
+                            if len(positive_counts) > 0:
+                                top_attr = positive_counts.index[0]
+                                mentioned_attrs = [top_attr]
+                                if not sentiment_filter:
+                                    sentiment_filter = "긍정"
+                        break
+                
+                # 디버그: 감지된 속성과 감성 표시
+                if mentioned_attrs or sentiment_filter:
+                    st.info(f"🔍 **감지된 필터**: 속성={mentioned_attrs if mentioned_attrs else '없음'}, 감성={sentiment_filter if sentiment_filter else '없음'}")
+                
                 # "지우고", "제외하고" 패턴 감지 - 이전 차트에서 특정 속성 제외
                 exclude_keywords = ["지우고", "제외하고", "빼고", "없이", "제외"]
                 is_chart_modification = False  # 이전 차트 수정 여부
@@ -236,7 +268,7 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                         if mentioned_attrs and len(mentioned_attrs) >= 1:
                             figs = []
                             for attr in mentioned_attrs:
-                                attr_df = df[df['속성'] == attr]
+                                attr_df = plot_df[plot_df['속성'] == attr]
                                 counts = attr_df['감성'].value_counts().reset_index()
                                 counts.columns = ['감성', '리뷰수']
                                 if len(counts) > 0:
@@ -385,7 +417,7 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                         if mentioned_attrs and len(mentioned_attrs) >= 1:
                             figs = []  # 여러 차트 저장
                             for attr in mentioned_attrs:
-                                attr_df = df[df['속성'] == attr]
+                                attr_df = plot_df[plot_df['속성'] == attr]
                                 counts = attr_df['감성'].value_counts().reset_index()
                                 counts.columns = ['감성', '리뷰수']
                                 if len(counts) > 0:
@@ -489,7 +521,7 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                         if st.session_state.last_chart_type == "pie":
                             figs = []
                             for attr in mentioned_attrs:
-                                attr_df = df[df['속성'] == attr]
+                                attr_df = plot_df[plot_df['속성'] == attr]
                                 if exclude_sentiments:
                                     attr_df = attr_df[~attr_df['감성'].isin(exclude_sentiments)]
                                 counts = attr_df['감성'].value_counts().reset_index()

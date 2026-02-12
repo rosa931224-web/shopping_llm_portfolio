@@ -335,14 +335,13 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                             
                             wordcloud_img_base64 = None
                             if text.strip():
-                                # 한글 폰트 경로 (맥용)
+                                # 한글 폰트 경로 (맥용) - 우선순위대로 시도
                                 import os
                                 import re
                                 font_paths = [
-                                    '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
                                     '/System/Library/Fonts/AppleSDGothicNeo.ttc',
-                                    '/Library/Fonts/AppleGothic.ttf',
-                                    '/System/Library/Fonts/Supplemental/NotoSansGothic-Regular.ttf'
+                                    '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
+                                    '/Library/Fonts/AppleGothic.ttf'
                                 ]
                                 font_path = None
                                 for fp in font_paths:
@@ -350,49 +349,65 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                                         font_path = fp
                                         break
                                 
+                                if not font_path:
+                                    st.warning("⚠️ 한글 폰트를 찾을 수 없습니다. 워드클라우드 생성이 제한될 수 있습니다.")
+                                
                                 # 한글 단어 정규식 (한글, 영문, 숫자를 하나의 단어로 인식)
                                 korean_regexp = r'[\uAC00-\uD7A3a-zA-Z0-9]+'
                                 
-                                wordcloud = WordCloud(
-                                    font_path=font_path,
-                                    width=1200, height=600,
-                                    background_color='white',
-                                    max_words=80,
-                                    min_font_size=14,
-                                    max_font_size=120,
-                                    regexp=korean_regexp,
-                                    colormap='Blues'  # 깔끔한 블루 그라데이션
-                                ).generate(text)
-                                
-                                # matplotlib으로 워드클라우드 생성 및 base64 저장
-                                import io
-                                import base64
-                                from matplotlib import font_manager
-                                
-                                # matplotlib 한글 폰트 설정
-                                font_prop = font_manager.FontProperties(fname=font_path) if font_path else None
-                                
-                                fig_wc, ax = plt.subplots(figsize=(14, 7))  # 더 큰 크기
-                                ax.imshow(wordcloud, interpolation='bilinear')
-                                ax.axis('off')
-                                # 제목에 속성 및 감성 정보 표시
-                                title_parts = []
-                                if mentioned_attrs:
-                                    title_parts.append(', '.join(mentioned_attrs))
-                                if sentiment_filter:
-                                    title_parts.append(sentiment_filter)
-                                if title_parts:
-                                    title_text = f"📊 {' '.join(title_parts)} 리뷰 워드클라우드"
-                                else:
-                                    title_text = "📊 전체 리뷰 워드클라우드"
-                                ax.set_title(title_text, fontproperties=font_prop, fontsize=16, fontweight='bold')
-                                
-                                # 이미지를 base64로 인코딩 (고화질)
-                                buf = io.BytesIO()
-                                fig_wc.savefig(buf, format='png', bbox_inches='tight', dpi=150, facecolor='white')
-                                buf.seek(0)
-                                wordcloud_img_base64 = base64.b64encode(buf.read()).decode('utf-8')
-                                plt.close()
+                                try:
+                                    wordcloud = WordCloud(
+                                        font_path=font_path,
+                                        width=1200, height=600,
+                                        background_color='white',
+                                        max_words=80,
+                                        min_font_size=14,
+                                        max_font_size=120,
+                                        regexp=korean_regexp,
+                                        colormap='Blues'  # 깔끔한 블루 그라데이션
+                                    ).generate(text)
+                                    
+                                    # matplotlib으로 워드클라우드 생성 및 base64 저장
+                                    import io
+                                    import base64
+                                    from matplotlib import font_manager
+                                    import matplotlib.pyplot as plt
+                                    
+                                    # matplotlib 한글 폰트 설정
+                                    if font_path:
+                                        font_prop = font_manager.FontProperties(fname=font_path)
+                                        plt.rcParams['font.family'] = font_prop.get_name()
+                                    
+                                    fig_wc, ax = plt.subplots(figsize=(14, 7))  # 더 큰 크기
+                                    ax.imshow(wordcloud, interpolation='bilinear')
+                                    ax.axis('off')
+                                    # 제목에 속성 및 감성 정보 표시
+                                    title_parts = []
+                                    if mentioned_attrs:
+                                        title_parts.append(', '.join(mentioned_attrs))
+                                    if sentiment_filter:
+                                        title_parts.append(sentiment_filter)
+                                    if title_parts:
+                                        title_text = f"📊 {' '.join(title_parts)} 리뷰 워드클라우드"
+                                    else:
+                                        title_text = "📊 전체 리뷰 워드클라우드"
+                                    
+                                    # 제목 설정 (폰트 속성 사용)
+                                    if font_path:
+                                        font_prop = font_manager.FontProperties(fname=font_path)
+                                        ax.set_title(title_text, fontproperties=font_prop, fontsize=16, fontweight='bold')
+                                    else:
+                                        ax.set_title(title_text, fontsize=16, fontweight='bold')
+                                    
+                                    # 이미지를 base64로 인코딩 (고화질)
+                                    buf = io.BytesIO()
+                                    fig_wc.savefig(buf, format='png', bbox_inches='tight', dpi=150, facecolor='white')
+                                    buf.seek(0)
+                                    wordcloud_img_base64 = base64.b64encode(buf.read()).decode('utf-8')
+                                    plt.close(fig_wc)
+                                except Exception as e:
+                                    st.error(f"워드클라우드 생성 중 오류: {e}")
+                                    wordcloud_img_base64 = None
                             else:
                                 st.warning("⚠️ 워드클라우드를 생성할 리뷰 텍스트가 없습니다.")
                             fig = None  # plotly 차트 대신

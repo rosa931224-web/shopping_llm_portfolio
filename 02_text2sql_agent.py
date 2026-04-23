@@ -3,7 +3,7 @@ from dotenv import load_dotenv
 from langchain_google_genai import ChatGoogleGenerativeAI
 from langchain_community.utilities import SQLDatabase
 from langchain_community.agent_toolkits import create_sql_agent
-from langgraph.checkpoint.memory import MemorySaver # 👈 기억력을 위한 도구
+from langgraph.checkpoint.memory import MemorySaver # 기억력을 위한 도구
 
 # 1. 환경 변수 로드
 load_dotenv()
@@ -38,7 +38,7 @@ config = {"configurable": {"thread_id": "jiyun_session_001"}}
 print("\n--- 🤖 랭그래프 분석 비서 가동 (기억력 탑재) ---")
 
 def ask_question(query):
-    print(f"\n🙋 지윤: {query}")
+    print(f"\n🙋 사용자: {query}")
     try:
         response = agent_executor.invoke({"input": query}, config=config)
         print(f"🤖 비서: {response['output']}")

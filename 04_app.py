@@ -3,11 +3,11 @@ import pandas as pd
 import sqlite3
 import os
 from dotenv import load_dotenv
-from langchain_openai import ChatOpenAI
 import plotly.express as px
 import plotly.graph_objects as go
-import os
 import platform
+from langchain_anthropic import ChatAnthropic
+
 
 def get_font_path():
     """운영체제에 맞는 한글 폰트 경로 반환"""
@@ -27,7 +27,7 @@ try:
     
     # Streamlit 환경에서 한글 폰트 전역 설정
     font_paths = [
-        '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',  # Linux (Streamlit Cloud) - 맨 앞에 추가!
+        '/usr/share/fonts/truetype/nanum/NanumGothic.ttf',  # Linux (Streamlit Cloud) - 맨 앞에 추가
         '/usr/share/fonts/truetype/nanum/NanumBarunGothic.ttf',  # Linux 대체
         '/System/Library/Fonts/AppleSDGothicNeo.ttc',  # macOS
         '/System/Library/Fonts/Supplemental/AppleGothic.ttf',
@@ -59,13 +59,44 @@ def load_data():
     conn = sqlite3.connect("shopping_reviews.db")
     df = pd.read_sql("SELECT * FROM naver_reviews", conn)
     conn.close()
+    df['리뷰일자'] = pd.to_datetime(df['리뷰일자'])
     return df
 
-df = load_data()
+df_all = load_data()
 
 # 사이드바 및 헤더 
 st.title("AI 실시간 분석 시스템")
 st.markdown("---")
+# 📅 날짜 필터
+st.sidebar.header("📅 기간 필터")
+date_min = df_all['리뷰일자'].min().date()
+date_max = df_all['리뷰일자'].max().date()
+
+# 초기화 버튼 - 세션키를 전체 기간으로 덮어쓰고 재실행
+if st.sidebar.button("🔄 전체 기간으로 초기화"):
+    st.session_state["date_range"] = (date_min, date_max)
+    st.rerun()
+
+# session_state 기본값 설정 (최초 실행 시)
+if "date_range" not in st.session_state:
+    st.session_state["date_range"] = (date_min, date_max)
+
+date_range = st.sidebar.date_input(
+    "리뷰 기간 선택",
+    min_value=date_min,
+    max_value=date_max,
+    key="date_range"
+)
+# 시작/종료일 처리 (한 날짜만 선택된 경우 대비)
+if isinstance(date_range, (list, tuple)) and len(date_range) == 2:
+    start_date, end_date = date_range
+else:
+    start_date, end_date = date_min, date_max
+
+# 날짜 필터 적용
+mask = (df_all['리뷰일자'].dt.date >= start_date) & (df_all['리뷰일자'].dt.date <= end_date)
+df = df_all[mask].copy()
+
 st.sidebar.header("📋 분석 가이드")
 st.sidebar.info("""
 **질문 예시**
@@ -82,6 +113,8 @@ st.sidebar.success("""
 - 📈 라인차트: "감성 추이 라인차트"
 - 🌳 트리맵: "속성 트리맵"
 - ☁️ 워드클라우드: "배송 워드클라우드"
+- 📅 년도별: "년도별 리뷰 차트"
+- 🗓️ 월별: "월별 감성 추이"
 """)
 
 # 2. 세션 상태 초기화
@@ -119,8 +152,12 @@ for i, message in enumerate(st.session_state.messages):
             import base64
             st.image(f"data:image/png;base64,{message['wordcloud_img']}")
 
-# 4. 분석 로직 (복잡한 모듈 없이 ChatOpenAI만 사용)
-llm = ChatOpenAI(model="gpt-4o", temperature=0)
+# 4. 분석 로직 (복잡한 모듈 없이 ChatOpenAI만 사용 > Claude-sonnet-4 로 변경)
+# llm = ChatOpenAI(model="gpt-4o", temperature=0)
+llm = ChatAnthropic(
+    model="claude-sonnet-4-20250514",  # 또는 "claude-haiku-4-5-20251001"
+    api_key=os.getenv("ANTHROPIC_API_KEY")
+)
 
 if prompt := st.chat_input("질문을 입력하세요!"):
     st.session_state.messages.append({"role": "user", "content": prompt})
@@ -218,8 +255,17 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                     mentioned_attrs = st.session_state.last_mentioned_attrs.copy()
                 
                 # 현재 질문에 감성이 없으면 이전 대화의 감성 사용 (컨텍스트 유지)
-                # 단, 명시적으로 "전체"를 요청하는 경우는 제외
-                if not sentiment_filter and st.session_state.last_sentiment_filter and "전체" not in prompt:
+                # 단, 아래 경우엔 초기화 (전체 데이터 질문으로 간주)
+                general_reset_keywords = [
+                    "전체", "총", "몇건", "몇 건", "몇개", "몇 개",
+                    "년도별", "연도별", "월별", "분기별", "반기별", "날짜별", "추이"
+                ]
+                is_general_question = any(kw in prompt for kw in general_reset_keywords)
+                # 속성도 감성도 없는 순수 일반 질문이면 컨텍스트 초기화
+                is_neutral_question = not mentioned_attrs and not sentiment_filter
+
+                if not sentiment_filter and st.session_state.last_sentiment_filter \
+                        and not is_general_question and not is_neutral_question:
                     sentiment_filter = st.session_state.last_sentiment_filter
                 
                 # 스마트 속성 감지 - "가장 ~한 속성" 패턴 처리
@@ -287,7 +333,9 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                 # 리뷰 표시 요청 키워드 감지 (차트 생성 전에 먼저 확인)
                 show_all_keywords = ["전체 리뷰", "모든 리뷰", "전체 보여줘", "리뷰 전체", 
                                     "리뷰만 보여줘", "리뷰 보여줘", "리뷰만", "리뷰 목록", 
-                                    "원문", "원문 보여줘", "내용 보여줘", "텍스트 보여줘"]
+                                    "원문", "원문 보여줘", "내용 보여줘", "텍스트 보여줘",
+                                    "전체 후기", "모든 후기", "후기 전체", "후기 보여줘",
+                                    "후기만 보여줘", "후기만", "후기 목록", "후기 다 보여", "후기 보여줘", "데이터 보여줘"]
                 chart_keywords = ["차트", "그래프", "그려", "시각화", "파이", "막대", "도넛", "트리맵", "워드클라우드", "라인"]
                 is_review_request = any(kw in prompt for kw in show_all_keywords) and not any(kw in prompt for kw in chart_keywords)
                 
@@ -296,8 +344,86 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                 
                 # 리뷰 표시 요청이 아닐 때만 차트 생성
                 if not is_review_request:
+                    # 년도별 차트
+                    if "년도별" in prompt or "연도별" in prompt:
+                        if "감성" in prompt:
+                            counts = plot_df.groupby([plot_df['리뷰일자'].dt.year, '감성']).size().reset_index(name='리뷰수')
+                            counts.columns = ['년도', '감성', '리뷰수']
+                            counts['년도'] = counts['년도'].astype(str)
+                            fig = px.line(counts, x='년도', y='리뷰수', color='감성',
+                                          title="📈 년도별 감성 추이",
+                                          markers=True,
+                                          color_discrete_map={'긍정': '#2ecc71', '부정': '#e74c3c', '중립': '#95a5a6'})
+                        else:
+                            counts = plot_df.groupby(plot_df['리뷰일자'].dt.year).size().reset_index(name='리뷰수')
+                            counts.columns = ['년도', '리뷰수']
+                            counts['년도'] = counts['년도'].astype(str)
+                            fig = px.line(counts, x='년도', y='리뷰수',
+                                          title="📈 년도별 리뷰 추이",
+                                          markers=True,
+                                          color_discrete_sequence=['#3498db'])
+                        fig.update_xaxes(type='category')
+                        st.session_state.last_chart_type = "yearly"
+
+                    # 월별 차트
+                    elif "월별" in prompt:
+                        plot_df = plot_df.copy()
+                        plot_df['년월'] = plot_df['리뷰일자'].dt.to_period('M').astype(str)
+                        if "감성" in prompt:
+                            counts = plot_df.groupby(['년월', '감성']).size().reset_index(name='리뷰수')
+                            fig = px.line(counts, x='년월', y='리뷰수', color='감성',
+                                          title="📊 월별 감성 추이",
+                                          markers=True,
+                                          color_discrete_map={'긍정': '#2ecc71', '부정': '#e74c3c', '중립': '#95a5a6'})
+                        else:
+                            counts = plot_df.groupby('년월').size().reset_index(name='리뷰수')
+                            fig = px.line(counts, x='년월', y='리뷰수',
+                                          title="📊 월별 리뷰 추이",
+                                          markers=True,
+                                          color_discrete_sequence=['#3498db'])
+                        fig.update_xaxes(tickangle=45)
+                        st.session_state.last_chart_type = "monthly"
+
+                    # 분기별 차트
+                    elif "분기별" in prompt or "분기" in prompt:
+                        plot_df = plot_df.copy()
+                        plot_df['분기'] = plot_df['리뷰일자'].dt.year.astype(str) + "-Q" + plot_df['리뷰일자'].dt.quarter.astype(str)
+                        if "감성" in prompt:
+                            counts = plot_df.groupby(['분기', '감성']).size().reset_index(name='리뷰수')
+                            fig = px.line(counts, x='분기', y='리뷰수', color='감성',
+                                          title="📈 분기별 감성 추이",
+                                          markers=True,
+                                          color_discrete_map={'긍정': '#2ecc71', '부정': '#e74c3c', '중립': '#95a5a6'})
+                        else:
+                            counts = plot_df.groupby('분기').size().reset_index(name='리뷰수')
+                            fig = px.line(counts, x='분기', y='리뷰수',
+                                          title="📈 분기별 리뷰 추이",
+                                          markers=True,
+                                          color_discrete_sequence=['#9b59b6'])
+                        fig.update_xaxes(tickangle=45)
+                        st.session_state.last_chart_type = "quarterly"
+
+                    # 반기별 차트
+                    elif "반기별" in prompt or "반기" in prompt:
+                        plot_df = plot_df.copy()
+                        plot_df['반기'] = plot_df['리뷰일자'].dt.year.astype(str) + "-" + \
+                                          plot_df['리뷰일자'].dt.month.apply(lambda m: "상반기" if m <= 6 else "하반기")
+                        if "감성" in prompt:
+                            counts = plot_df.groupby(['반기', '감성']).size().reset_index(name='리뷰수')
+                            fig = px.line(counts, x='반기', y='리뷰수', color='감성',
+                                          title="📈 반기별 감성 추이",
+                                          markers=True,
+                                          color_discrete_map={'긍정': '#2ecc71', '부정': '#e74c3c', '중립': '#95a5a6'})
+                        else:
+                            counts = plot_df.groupby('반기').size().reset_index(name='리뷰수')
+                            fig = px.line(counts, x='반기', y='리뷰수',
+                                          title="📈 반기별 리뷰 추이",
+                                          markers=True,
+                                          color_discrete_sequence=['#e67e22'])
+                        st.session_state.last_chart_type = "halfyearly"
+
                     # 도넛 차트
-                    if "도넛" in prompt or "donut" in prompt.lower():
+                    elif "도넛" in prompt or "donut" in prompt.lower():
                         if mentioned_attrs and len(mentioned_attrs) >= 1:
                             figs = []
                             for attr in mentioned_attrs:
@@ -368,7 +494,7 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                             
                             wordcloud_img_base64 = None
                             if text.strip():
-                                # 한글 폰트 경로 (맥용) - 우선순위대로 시도
+                                # 한글 폰트 경로 
                                 import os
                                 import re
                                 font_paths = [
@@ -390,9 +516,10 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                                 # 한글 단어 정규식 (한글, 영문, 숫자를 하나의 단어로 인식)
                                 korean_regexp = r'[\uAC00-\uD7A3a-zA-Z0-9]+'
                                 
+                                wc_font = korean_font_path if 'korean_font_path' in globals() and korean_font_path else font_path
                                 try:
                                     wordcloud = WordCloud(
-                                        font_path=korean_font_path if 'korean_font_path' in dir() else font_path,
+                                        font_path=wc_font,
                                         width=1200, height=600,
                                         background_color='white',
                                         max_words=80,
@@ -554,9 +681,8 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                                      color_discrete_sequence=px.colors.qualitative.Pastel)
                         fig.update_traces(textposition='outside')
                         st.session_state.last_chart_type = "simple"
-                    # 속성만 언급하고 차트 키워드가 없는 경우 - 이전 차트 유형 유지 또는 기본 막대 차트
-                    elif mentioned_attrs and len(mentioned_attrs) >= 1 and st.session_state.last_chart_type:
-                        # 이전에 차트를 보고 있었다면 같은 유형으로 계속 보여줌
+                    # 속성 언급 시 항상 차트 표시 (이전 유형 유지 또는 기본 감성 막대차트)
+                    elif mentioned_attrs and len(mentioned_attrs) >= 1:
                         if st.session_state.last_chart_type == "pie":
                             figs = []
                             for attr in mentioned_attrs:
@@ -574,14 +700,16 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                                     figs.append(fig_single)
                             fig = figs if figs else None
                         else:
-                            # 기본: 속성별 막대 차트
-                            counts = plot_df['속성'].value_counts().reset_index()
-                            counts.columns = ['속성', '리뷰수']
-                            fig = px.bar(counts, x='속성', y='리뷰수', color='속성', 
-                                         title=f"📊 선택 속성 분포",
+                            # 기본: 속성별 감성 분포 막대 차트
+                            counts = plot_df.groupby(['속성', '감성']).size().reset_index(name='리뷰수')
+                            attr_title = ', '.join(mentioned_attrs)
+                            fig = px.bar(counts, x='속성', y='리뷰수', color='감성',
+                                         barmode='group',
+                                         title=f"📊 {attr_title} 감성 분포",
                                          text='리뷰수',
-                                         color_discrete_sequence=px.colors.qualitative.Pastel)
+                                         color_discrete_map={'긍정': '#2ecc71', '부정': '#e74c3c', '중립': '#95a5a6'})
                             fig.update_traces(textposition='outside')
+                            st.session_state.last_chart_type = "sentiment"
                     else:
                         # 차트 없음 (텍스트 질문)
                         fig = None
@@ -646,10 +774,62 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                         if len(matched_reviews) > 0:
                             search_result = f"\n\n**🔍 '{search_word}' 키워드 검색 결과 ({len(matched_reviews)}건)**\n\n"
                             for idx, row in matched_reviews.head(5).iterrows():
-                                search_result += f"- [{row['속성']}] {row['리뷰'][:100]}...\n"
+                                date_str = str(row['리뷰일자'])[:10] if pd.notna(row['리뷰일자']) else ''
+                                search_result += f"- `{date_str}` [{row['속성']}] {row['리뷰'][:100]}...\n"
                             if len(matched_reviews) > 5:
                                 search_result += f"\n... 외 {len(matched_reviews)-5}건 더 있습니다."
                 
+                # [Step 3.8] 날짜별 피크 분석 기능
+                date_analysis_result = None
+                date_peak_keywords = ["날짜", "언제", "많은 날", "피크", "몇 월", "어느 날", "날 알려", "날짜 알려",
+                                       "많은 월", "가장 많은 월", "월은", "월이야", "몇월"]
+                if any(kw in prompt for kw in date_peak_keywords):
+                    peak_df = plot_df.copy()
+
+                    # 프롬프트에서 연도 추출 (25년 → 2025, 2024년 → 2024 등)
+                    import re as _re
+                    year_match = _re.search(r'(20\d{2})년?|(\d{2})년', prompt)
+                    target_year = None
+                    if year_match:
+                        if year_match.group(1):
+                            target_year = int(year_match.group(1))
+                        elif year_match.group(2):
+                            target_year = 2000 + int(year_match.group(2))
+                        peak_df = peak_df[peak_df['리뷰일자'].dt.year == target_year]
+
+                    # 월별 질문인지 일별 질문인지 판단
+                    is_month_query = any(kw in prompt for kw in ["몇 월", "몇월", "많은 월", "가장 많은 월", "월은", "월이야"])
+
+                    attr_label = ', '.join(mentioned_attrs) if mentioned_attrs else "전체"
+                    sentiment_label = sentiment_filter if sentiment_filter else "전체"
+                    year_label = f"{target_year}년 " if target_year else ""
+                    top_count = top_n if top_n else 5
+
+                    if is_month_query:
+                        # 월별 집계
+                        peak_df['년월'] = peak_df['리뷰일자'].dt.to_period('M').astype(str)
+                        date_counts = peak_df.groupby('년월').size().reset_index(name='리뷰수')
+                        date_counts = date_counts.sort_values('리뷰수', ascending=False)
+                        top_dates = date_counts.head(top_count)
+                        if len(top_dates) > 0:
+                            date_analysis_result = f"\n\n**📅 {year_label}[{attr_label}] {sentiment_label} 리뷰가 많은 월 Top {len(top_dates)}:**\n"
+                            for i, (_, row) in enumerate(top_dates.iterrows(), 1):
+                                date_analysis_result += f"{i}. **{row['년월']}** — {row['리뷰수']}건\n"
+                        else:
+                            date_analysis_result = f"\n\n⚠️ {year_label}해당 조건에 맞는 월 데이터가 없습니다."
+                    else:
+                        # 일별 집계
+                        date_counts = peak_df.groupby(peak_df['리뷰일자'].dt.date).size().reset_index(name='리뷰수')
+                        date_counts.columns = ['날짜', '리뷰수']
+                        date_counts = date_counts.sort_values('리뷰수', ascending=False)
+                        top_dates = date_counts.head(top_count)
+                        if len(top_dates) > 0:
+                            date_analysis_result = f"\n\n**📅 {year_label}[{attr_label}] {sentiment_label} 리뷰가 많은 날짜 Top {len(top_dates)}:**\n"
+                            for i, (_, row) in enumerate(top_dates.iterrows(), 1):
+                                date_analysis_result += f"{i}. **{row['날짜']}** — {row['리뷰수']}건\n"
+                        else:
+                            date_analysis_result = f"\n\n⚠️ {year_label}해당 조건에 맞는 날짜 데이터가 없습니다."
+
                 # [Step 3.7] 전체 리뷰 표시 기능
                 all_reviews_result = None
                 
@@ -685,7 +865,8 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                         
                         # 리뷰 목록 생성
                         for idx, (_, row) in enumerate(filtered_reviews.head(display_count).iterrows(), 1):
-                            all_reviews_result += f"{idx}. {row['리뷰']}\n\n"
+                            date_str = str(row['리뷰일자'])[:10] if pd.notna(row['리뷰일자']) else ''
+                            all_reviews_result += f"{idx}. `{date_str}` {row['리뷰']}\n\n"
                     else:
                         all_reviews_result = "\n\n⚠️ 해당 조건의 리뷰가 없습니다."
                 
@@ -697,8 +878,12 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                 sentiment_by_attr = df.groupby(['속성', '감성']).size().unstack(fill_value=0).to_dict()
                 
                 # 전체 데이터 요약
+                date_range_str = f"{df['리뷰일자'].min().strftime('%Y-%m')} ~ {df['리뷰일자'].max().strftime('%Y-%m')}"
+                monthly_counts = df.groupby(df['리뷰일자'].dt.to_period('M').astype(str)).size().to_dict()
                 full_data_summary = {
                     "총 리뷰 수": len(df),
+                    "데이터 기간": date_range_str,
+                    "년월별 리뷰수": monthly_counts,
                     "속성별 리뷰수": attr_counts,
                     "속성별 감성 분포": sentiment_by_attr
                 }
@@ -726,7 +911,9 @@ if prompt := st.chat_input("질문을 입력하세요!"):
 8. 그래프가 자동으로 생성된다는 점을 언급하지 마세요
 9. 사용자가 "전체 리뷰", "모든 리뷰", "원문" 등을 요청하면 시스템이 자동으로 전체 리뷰 목록을 제공하므로, 당신은 리뷰 내용을 직접 나열하지 마세요
 10. 리뷰 전체를 요청받으면 아주 간단히 "아래에 리뷰를 표시합니다" 정도로만 답하고, 절대로 리뷰 예시를 직접 쓰지 마세요
-11. "리뷰", "원문" 등을 요청하면 그래프는 보여주지 마세요.
+12. 데이터에는 '리뷰일자' 컬럼이 있어 월별/분기별/년도별 분석이 가능합니다
+13. '25년', '2025년', '24년' 같이 연도가 언급되면 해당 연도 데이터만 분석합니다
+14. '몇 월이야', '가장 많은 월은' 같은 질문에서 시스템이 자동으로 월별 순위를 계산해 아래 보여주므로, 당신은 간단한 리드 문구만 제공하세요
 
 이전 대화:
 """ + conversation_history + """
@@ -751,6 +938,10 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                 # 전체 리뷰 결과가 있으면 추가
                 if all_reviews_result:
                     analysis_res += all_reviews_result
+
+                # 날짜 피크 분석 결과가 있으면 추가
+                if date_analysis_result:
+                    analysis_res += date_analysis_result
                 
                 # 현재 사용된 필터를 세션에 저장 (다음 질문에서 컨텍스트 유지)
                 st.session_state.last_mentioned_attrs = mentioned_attrs if mentioned_attrs else []
@@ -776,15 +967,17 @@ if prompt := st.chat_input("질문을 입력하세요!"):
             
             if fig is not None:
                 st.session_state.last_chart_attrs = plot_df['속성'].unique().tolist()
-                # 차트를 JSON으로 변환하여 저장 (세션 직렬화 문제 방지)
-                # 리스트인 경우 각각 변환
+                # 레이블 잘림 방지: 상단 여백 일괄 적용
                 if isinstance(fig, list):
+                    for f in fig:
+                        f.update_layout(margin=dict(t=80, b=40))
                     chart_json = [f.to_dict() for f in fig]
                 else:
+                    fig.update_layout(margin=dict(t=80, b=40))
                     chart_json = fig.to_dict()
             
             # 워드클라우드 이미지 저장 (있는 경우)
-            if 'wordcloud_img_base64' in dir() and wordcloud_img_base64:
+            if wordcloud_img_base64:
                 wc_img = wordcloud_img_base64
                 st.session_state.last_chart_attrs = plot_df['속성'].unique().tolist()
             

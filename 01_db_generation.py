@@ -7,7 +7,7 @@ from dotenv import load_dotenv
 load_dotenv()
 
 # 2. 경로 설정 (data 폴더 안의 원본 파일)
-csv_file = 'data/09_reviews_long_for_tableau.csv'
+csv_file = 'data/09_reviews_long_with_date.csv'
 db_file = 'shopping_reviews.db'
 
 def create_review_db():

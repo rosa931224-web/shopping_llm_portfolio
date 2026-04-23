@@ -6,9 +6,8 @@
 __pycache__/
 *.pyc
 
-# 데이터베이스
-*.db
-*.sqlite
+# 데이터베이스 (로컬 백업용만 제외)
+# *.db
 
 # 기타
 .DS_Store

@@ -666,7 +666,8 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                                      text=counts.apply(lambda x: f"{x['리뷰수']}건 ({x['비중(%)']}%)", axis=1),
                                      color_discrete_sequence=[color_map.get(sentiment_filter, '#3498db')])
                         fig.update_traces(textposition='outside')
-                    elif "차트" in prompt or "그래프" in prompt or "시각화" in prompt or "분포" in prompt or "그려" in prompt:
+                    elif "차트" in prompt or "그래프" in prompt or "시각화" in prompt or "분포" in prompt or "그려" in prompt \
+                            or ("속성" in prompt and not mentioned_attrs):
                         # 기본값: 속성별 분포 차트 (단순)
                         counts = plot_df['속성'].value_counts().reset_index()
                         counts.columns = ['속성', '리뷰수']

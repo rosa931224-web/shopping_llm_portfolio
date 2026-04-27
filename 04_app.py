@@ -338,7 +338,12 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                                     "전체 후기", "모든 후기", "후기 전체", "후기 보여줘",
                                     "후기만 보여줘", "후기만", "후기 목록", "후기 다 보여", "후기 보여줘", "데이터 보여줘"]
                 chart_keywords = ["차트", "그래프", "그려", "시각화", "파이", "막대", "도넛", "트리맵", "워드클라우드", "라인"]
-                is_review_request = any(kw in prompt for kw in show_all_keywords) and not any(kw in prompt for kw in chart_keywords)
+                count_keywords = ["몇개", "몇 개", "몇건", "몇 건", "총 개수", "총 건수", "개수", "건수"]
+                is_review_request = (
+                    any(kw in prompt for kw in show_all_keywords)
+                    and not any(kw in prompt for kw in chart_keywords)
+                    and not any(kw in prompt for kw in count_keywords)  # 건수 질문 제외
+                )
                 
                 # 사용자 질문에서 직접 차트 유형 결정
                 wordcloud_img_base64 = None  # 워드클라우드 이미지 초기화
@@ -858,10 +863,10 @@ if prompt := st.chat_input("질문을 입력하세요!"):
                         else:
                             all_reviews_result = f"\n\n**📋 {attr_label} - {sentiment_label} 리뷰 전체 ({unique_count}건)**\n\n"
                         
-                        # 리뷰가 너무 많으면 경고
-                        if unique_count > 100:
-                            all_reviews_result += f"⚠️ 리뷰가 {unique_count}건으로 많습니다. 처음 100건만 표시합니다.\n\n"
-                            display_count = 100
+                        # 리뷰가 너무 많으면 50건만 표시
+                        if unique_count > 50:
+                            all_reviews_result += f"⚠️ 리뷰가 {unique_count}건으로 많습니다. 처음 50건만 표시합니다.\n\n"
+                            display_count = 50
                         else:
                             display_count = unique_count
                         
@@ -991,21 +996,6 @@ if prompt := st.chat_input("질문을 입력하세요!"):
             })
             st.rerun()  # 세션 저장 후 페이지 새로고침하여 상단에서 출력
 
-# 자동 스크롤 (Streamlit components 사용)
-import streamlit.components.v1 as components
-
-# 새 메시지가 있으면 맨 아래로 스크롤
-if st.session_state.messages:
-    components.html(
-        """
-        <script>
-            // Streamlit의 부모 프레임으로 스크롤
-            const streamlitDoc = window.parent.document;
-            streamlitDoc.documentElement.scrollTop = streamlitDoc.documentElement.scrollHeight;
-        </script>
-        """,
-        height=0
-    )
 
 # 스크롤바 항상 표시 CSS + 대화창 폰트 크기 조정
 st.markdown(

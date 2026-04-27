@@ -55,8 +55,9 @@ st.set_page_config(page_title="AI 자동 분석 시스템", layout="wide")
 
 @st.cache_resource
 def load_data():
-    # 경로 정합성을 위해 sqlite3 직접 연결
-    conn = sqlite3.connect("shopping_reviews.db")
+    # 절대 경로 사용 (Streamlit Cloud 호환)
+    db_path = os.path.join(os.path.dirname(os.path.abspath(__file__)), "shopping_reviews.db")
+    conn = sqlite3.connect(db_path)
     df = pd.read_sql("SELECT * FROM naver_reviews", conn)
     conn.close()
     df['리뷰일자'] = pd.to_datetime(df['리뷰일자'])
